@@ -1,63 +1,62 @@
 """
-RAG chain implementation using langchain and langgraph.
+基于langchain和langgraph的RAG链实现。
 """
 from typing import Dict, List, Any
 from langchain.prompts import ChatPromptTemplate
-from langchain_community.chat_models import ChatOpenAI
 from langchain.schema import Document
 from langgraph.graph import END, StateGraph
 from app.core.vector_store import get_vector_store
-from app.config.settings import OPENAI_API_KEY
+from app.core.deepseek_llm import DeepSeekLLM
 
 
 class RAGChain:
     """RAG chain implementation for data governance knowledge base."""
     
     def __init__(self):
-        """Initialize the RAG chain."""
+        """初始化RAG链。"""
         self.vector_store = get_vector_store()
-        self.llm = ChatOpenAI(api_key=OPENAI_API_KEY, model_name="gpt-3.5-turbo")
+        self.llm = DeepSeekLLM(temperature=0.7, max_tokens=1024)
         
         self.prompt_template = ChatPromptTemplate.from_template("""
-        You are a data governance assistant. Use the following retrieved documents to answer the user's question.
-        If you don't know the answer, just say that you don't know, don't try to make up an answer.
+        你是一个OceanBase数据库助手。使用以下检索到的文档来回答用户的问题。
+        回答要精确、简洁。如果你不知道答案，只需说你不知道，不要尝试编造答案。
         
-        Context:
+        检索到的OceanBase文档内容:
         {context}
         
-        Question: {question}
+        问题: {question}
         
-        Answer:
+        回答:
         """)
     
     def _retrieve(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Retrieve relevant documents from the vector store."""
+        """从向量存储中检索相关文档。"""
         query = state["query"]
         try:
             results = self.vector_store.similarity_search(query)
             
             if results:
                 context = "\n\n".join([
-                    f"Document: {result['filename']}\n{result['content']}"
+                    f"文档: {result['filename']}\n{result['content']}"
                     for result in results
                 ])
                 
                 state["context"] = context
                 state["retrieved_documents"] = results
             else:
-                print("No relevant documents found for the query")
-                state["context"] = "No relevant documents found."
+                print("未找到与查询相关的文档")
+                state["context"] = "未找到相关文档。"
                 state["retrieved_documents"] = []
         except Exception as e:
-            print(f"Error retrieving documents: {e}")
-            print("Using empty results for testing purposes")
-            state["context"] = "No documents could be retrieved due to an error."
+            print(f"检索文档时出错: {e}")
+            print("使用空结果进行测试")
+            state["context"] = "由于发生错误，无法检索文档。"
             state["retrieved_documents"] = []
             
         return state
     
     def _generate(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a response using the LLM."""
+        """使用LLM生成回答。"""
         prompt = self.prompt_template.format(
             context=state["context"],
             question=state["query"]
@@ -65,20 +64,20 @@ class RAGChain:
         
         try:
             response = self.llm.invoke(prompt)
-            state["response"] = response.content
+            state["response"] = response
         except Exception as e:
-            print(f"Error generating response with LLM: {e}")
-            print("Using fallback response generation")
+            print(f"使用LLM生成回答时出错: {e}")
+            print("使用备用回答生成")
             if state["retrieved_documents"]:
                 doc = state["retrieved_documents"][0]
-                state["response"] = f"Based on the retrieved document '{doc['filename']}', here is some information: {doc['content'][:500]}..."
+                state["response"] = f"根据检索到的文档 '{doc['filename']}'，以下是一些信息: {doc['content'][:500]}..."
             else:
-                state["response"] = "I don't have enough information to answer that question. Please try uploading more documents or rephrasing your query."
+                state["response"] = "我没有足够的信息来回答这个问题。请尝试上传更多文档或重新表述您的问题。"
         
         return state
     
     def build_graph(self) -> StateGraph:
-        """Build the RAG graph using langgraph."""
+        """使用langgraph构建RAG图。"""
         from typing import TypedDict, List, Dict, Any
         
         class GraphState(TypedDict):
@@ -101,13 +100,13 @@ class RAGChain:
     
     def query(self, query: str) -> Dict[str, Any]:
         """
-        Query the RAG chain.
+        查询RAG链。
         
-        Args:
-            query: User query
+        参数:
+            query: 用户查询
             
-        Returns:
-            Response from the RAG chain
+        返回:
+            来自RAG链的响应
         """
         try:
             graph = self.build_graph()
@@ -116,11 +115,11 @@ class RAGChain:
             result = chain.invoke({"query": query})
             return result
         except Exception as e:
-            print(f"Error in RAG chain query: {e}")
-            print("Using fallback response")
+            print(f"RAG链查询出错: {e}")
+            print("使用备用响应")
             
             return {
                 "query": query,
-                "response": "I'm sorry, I couldn't process your query due to a technical issue. Please try again later or try uploading more documents.",
+                "response": "很抱歉，由于技术问题，我无法处理您的查询。请稍后再试或尝试上传更多文档。",
                 "retrieved_documents": []
             }

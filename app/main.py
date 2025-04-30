@@ -4,7 +4,7 @@ Main application file for the data governance knowledge base.
 import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.api.endpoints import router as api_router
@@ -13,8 +13,8 @@ from app.config.settings import UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = FastAPI(
-    title="Data Governance Knowledge Base",
-    description="A data governance knowledge base with RAG capabilities",
+    title="OceanBase知识库",
+    description="基于OceanBase文档的知识库，具有RAG检索能力",
     version="1.0.0",
 )
 
@@ -45,104 +45,151 @@ with open(os.path.join(templates_dir, "index.html"), "w") as f:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Data Governance Knowledge Base</title>
+    <title>OceanBase知识库</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        :root {
+            --deepseek-primary: #1e3a8a;
+            --deepseek-secondary: #3b82f6;
+            --deepseek-background: #f8fafc;
+            --deepseek-text: #1e293b;
+            --deepseek-border: #e2e8f0;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            max-width: 960px;
             margin: 0 auto;
             padding: 20px;
+            background-color: var(--deepseek-background);
+            color: var(--deepseek-text);
+            line-height: 1.6;
         }
+        
+        h1, h2, h3 {
+            color: var(--deepseek-primary);
+            font-weight: 600;
+        }
+        
         h1 {
-            color: #333;
+            font-size: 28px;
+            margin-bottom: 24px;
+            text-align: center;
         }
+        
         .container {
-            margin-top: 20px;
+            margin-top: 28px;
+            background-color: white;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
+        
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
+        
         label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            font-weight: 500;
         }
+        
         input[type="file"], input[type="text"] {
             width: 100%;
-            padding: 8px;
-            box-sizing: border-box;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .result {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background-color: #f9f9f9;
-        }
-        .documents {
-            margin-top: 20px;
-        }
-        .document-item {
             padding: 10px;
-            margin-bottom: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            box-sizing: border-box;
+            border: 1px solid var(--deepseek-border);
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        
+        button {
+            background-color: var(--deepseek-secondary);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        
+        button:hover {
+            background-color: var(--deepseek-primary);
+        }
+        
+        .result {
+            margin-top: 24px;
+            padding: 20px;
+            border: 1px solid var(--deepseek-border);
+            border-radius: 6px;
+            background-color: white;
+        }
+        
+        .documents {
+            margin-top: 24px;
+        }
+        
+        .document-item {
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid var(--deepseek-border);
+            border-radius: 6px;
+            background-color: white;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .document-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
 <body>
-    <h1>Data Governance Knowledge Base</h1>
+    <h1>OceanBase知识库</h1>
     
     <div class="container">
-        <h2>Upload Document</h2>
+        <h2>上传文档</h2>
         <div class="form-group">
-            <label for="document">Select Document:</label>
+            <label for="document">选择文档：</label>
             <input type="file" id="document" name="document">
         </div>
-        <button onclick="uploadDocument()">Upload</button>
+        <button onclick="uploadDocument()">上传</button>
     </div>
     
     <div class="container">
-        <h2>Query Knowledge Base</h2>
+        <h2>查询知识库</h2>
         <div class="form-group">
-            <label for="query">Enter Query:</label>
-            <input type="text" id="query" name="query" placeholder="Ask a question...">
+            <label for="query">输入问题：</label>
+            <input type="text" id="query" name="query" placeholder="请输入您的问题...">
         </div>
-        <button onclick="queryKnowledgeBase()">Submit</button>
+        <button onclick="queryKnowledgeBase()">提交</button>
         
         <div id="result" class="result" style="display: none;"></div>
     </div>
     
     <div class="container">
-        <h2>Documents</h2>
-        <button onclick="loadDocuments()">Refresh Documents</button>
+        <h2>文档列表</h2>
+        <button onclick="loadDocuments()">刷新文档</button>
         <div id="documents" class="documents"></div>
     </div>
     
     <script>
-        // Load documents on page load
+        // 页面加载时加载文档
         window.onload = function() {
             loadDocuments();
         };
         
-        // Upload document
+        // 上传文档
         async function uploadDocument() {
             const fileInput = document.getElementById('document');
             const file = fileInput.files[0];
             
             if (!file) {
-                alert('Please select a file');
+                alert('请选择一个文件');
                 return;
             }
             
@@ -158,23 +205,23 @@ with open(os.path.join(templates_dir, "index.html"), "w") as f:
                 const data = await response.json();
                 
                 if (response.ok) {
-                    alert('Document uploaded successfully');
+                    alert('文档上传成功');
                     loadDocuments();
                 } else {
-                    alert(`Error: ${data.detail}`);
+                    alert(`错误: ${data.detail}`);
                 }
             } catch (error) {
-                alert(`Error: ${error.message}`);
+                alert(`错误: ${error.message}`);
             }
         }
         
-        // Query knowledge base
+        // 查询知识库
         async function queryKnowledgeBase() {
             const queryInput = document.getElementById('query');
             const query = queryInput.value.trim();
             
             if (!query) {
-                alert('Please enter a query');
+                alert('请输入问题');
                 return;
             }
             
@@ -192,13 +239,13 @@ with open(os.path.join(templates_dir, "index.html"), "w") as f:
                 if (response.ok) {
                     const resultDiv = document.getElementById('result');
                     resultDiv.innerHTML = `
-                        <h3>Response:</h3>
+                        <h3>回答:</h3>
                         <p>${data.response}</p>
-                        <h3>Retrieved Documents:</h3>
+                        <h3>检索到的文档:</h3>
                         <ul>
                             ${data.retrieved_documents.map(doc => `
                                 <li>
-                                    <strong>${doc.filename}</strong> (Score: ${doc.similarity.toFixed(2)})
+                                    <strong>${doc.filename}</strong> (相关度: ${doc.similarity.toFixed(2)})
                                     <p>${doc.content.substring(0, 200)}...</p>
                                 </li>
                             `).join('')}
@@ -206,14 +253,14 @@ with open(os.path.join(templates_dir, "index.html"), "w") as f:
                     `;
                     resultDiv.style.display = 'block';
                 } else {
-                    alert(`Error: ${data.detail}`);
+                    alert(`错误: ${data.detail}`);
                 }
             } catch (error) {
-                alert(`Error: ${error.message}`);
+                alert(`错误: ${error.message}`);
             }
         }
         
-        // Load documents
+        // 加载文档
         async function loadDocuments() {
             try {
                 const response = await fetch('/api/documents');
@@ -222,27 +269,27 @@ with open(os.path.join(templates_dir, "index.html"), "w") as f:
                 const documentsDiv = document.getElementById('documents');
                 
                 if (data.documents.length === 0) {
-                    documentsDiv.innerHTML = '<p>No documents found</p>';
+                    documentsDiv.innerHTML = '<p>未找到文档</p>';
                     return;
                 }
                 
                 documentsDiv.innerHTML = data.documents.map(doc => `
                     <div class="document-item">
                         <h3>${doc.filename}</h3>
-                        <p><strong>Upload Date:</strong> ${new Date(doc.upload_date).toLocaleString()}</p>
-                        <p><strong>Size:</strong> ${formatFileSize(doc.size)}</p>
-                        <p><strong>Type:</strong> ${doc.content_type}</p>
+                        <p><strong>上传日期:</strong> ${new Date(doc.upload_date).toLocaleString()}</p>
+                        <p><strong>大小:</strong> ${formatFileSize(doc.size)}</p>
+                        <p><strong>类型:</strong> ${doc.content_type}</p>
                     </div>
                 `).join('');
             } catch (error) {
-                alert(`Error: ${error.message}`);
+                alert(`错误: ${error.message}`);
             }
         }
         
-        // Format file size
+        // 格式化文件大小
         function formatFileSize(bytes) {
             if (bytes < 1024) {
-                return bytes + ' bytes';
+                return bytes + ' 字节';
             } else if (bytes < 1024 * 1024) {
                 return (bytes / 1024).toFixed(2) + ' KB';
             } else {

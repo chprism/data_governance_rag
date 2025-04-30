@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 OCEANBASE_HOST = os.getenv("OCEANBASE_HOST", "localhost")
 OCEANBASE_PORT = int(os.getenv("OCEANBASE_PORT", "2881"))
@@ -18,7 +19,8 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__f
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'md', 'csv', 'json'}
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max upload size
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-VECTOR_DIMENSION = 1536  # Dimension for text-embedding-3-small
+DEEPSEEK_EMBEDDING_MODEL = "deepseek-ai/deepseek-embed-v1"
+DEEPSEEK_CHAT_MODEL = "deepseek-ai/deepseek-chat"
+VECTOR_DIMENSION = 1024  # DeepSeek embedding向量维度
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
