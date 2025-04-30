@@ -1,23 +1,22 @@
 """
-Vector store implementation with support for both OceanBase and SQLite.
+Vector store implementation with OceanBase.
 """
 import uuid
 import json
 import os
-import sqlite3
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pymysql
 from sqlalchemy import create_engine, text
-from openai import OpenAI
+import requests
 from app.config.settings import (
     OCEANBASE_HOST, 
     OCEANBASE_PORT, 
     OCEANBASE_USER, 
     OCEANBASE_PASSWORD, 
     OCEANBASE_DATABASE,
-    OPENAI_API_KEY,
-    EMBEDDING_MODEL,
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_EMBEDDING_MODEL,
     VECTOR_DIMENSION
 )
 
@@ -27,254 +26,41 @@ class BaseVectorStore:
     
     def __init__(self):
         """Initialize the base vector store."""
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        self.api_key = DEEPSEEK_API_KEY
+        self.embedding_model = DEEPSEEK_EMBEDDING_MODEL
     
     def create_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Create embeddings for a list of texts using OpenAI API."""
+        """Create embeddings for a list of texts using DeepSeek API."""
         try:
-            response = self.client.embeddings.create(
-                model=EMBEDDING_MODEL,
-                input=texts
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": self.embedding_model,
+                "input": texts
+            }
+            
+            response = requests.post(
+                "https://api.deepseek.com/v1/embeddings",
+                headers=headers,
+                json=payload
             )
-            return [item.embedding for item in response.data]
+            
+            if response.status_code == 200:
+                result = response.json()
+                return [item["embedding"] for item in result["data"]]
+            else:
+                raise Exception(f"Error from DeepSeek API: {response.text}")
+                
         except Exception as e:
             print(f"Error creating embeddings: {e}")
             print("Using random embeddings for testing purposes")
             return [list(np.random.rand(VECTOR_DIMENSION).astype(float)) for _ in range(len(texts))]
 
 
-class SQLiteVectorStore(BaseVectorStore):
-    """Vector store implementation using SQLite."""
-    
-    def __init__(self, db_path=None):
-        """Initialize the SQLite vector store."""
-        super().__init__()
-        if db_path is None:
-            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vector_store.db")
-        self.db_path = db_path
-        self._initialize_tables()
-    
-    def _initialize_tables(self):
-        """Initialize the necessary tables in SQLite."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                content_type TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                metadata TEXT
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS document_chunks (
-                id TEXT PRIMARY KEY,
-                document_id TEXT NOT NULL,
-                content TEXT NOT NULL,
-                metadata TEXT,
-                FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS vectors (
-                id TEXT PRIMARY KEY,
-                chunk_id TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                FOREIGN KEY (chunk_id) REFERENCES document_chunks(id) ON DELETE CASCADE
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
-    
-    def add_document(self, document_data: Dict[str, Any], chunks: List[Dict[str, Any]]) -> str:
-        """
-        Add a document and its chunks to the vector store.
-        
-        Args:
-            document_data: Document metadata
-            chunks: List of document chunks
-            
-        Returns:
-            Document ID
-        """
-        document_id = document_data.get('id') or str(uuid.uuid4())
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute(
-                """
-                INSERT INTO documents (id, filename, content_type, size, metadata)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    document_id,
-                    document_data["filename"],
-                    document_data["content_type"],
-                    document_data["size"],
-                    json.dumps(document_data.get("metadata", {}))
-                )
-            )
-            
-            batch_size = 10
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i+batch_size]
-                
-                texts = [chunk["content"] for chunk in batch]
-                
-                embeddings = self.create_embeddings(texts)
-                
-                for j, chunk in enumerate(batch):
-                    chunk_id = chunk.get("id") or str(uuid.uuid4())
-                    
-                    cursor.execute(
-                        """
-                        INSERT INTO document_chunks (id, document_id, content, metadata)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            chunk_id,
-                            document_id,
-                            chunk["content"],
-                            json.dumps(chunk["metadata"])
-                        )
-                    )
-                    
-                    embedding_bytes = np.array(embeddings[j], dtype=np.float32).tobytes()
-                    cursor.execute(
-                        """
-                        INSERT INTO vectors (id, chunk_id, embedding)
-                        VALUES (?, ?, ?)
-                        """,
-                        (
-                            str(uuid.uuid4()),
-                            chunk_id,
-                            embedding_bytes
-                        )
-                    )
-            
-            conn.commit()
-            return document_id
-        
-        except Exception as e:
-            conn.rollback()
-            raise e
-        
-        finally:
-            conn.close()
-    
-    def similarity_search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """
-        Perform similarity search for a query.
-        
-        Args:
-            query: Query text
-            top_k: Number of top results to return
-            
-        Returns:
-            List of document chunks with similarity scores
-        """
-        query_embedding = self.create_embeddings([query])[0]
-        query_embedding_array = np.array(query_embedding, dtype=np.float32)
-        
-        results = []
-        
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                SELECT v.id, v.chunk_id, v.embedding, c.content, c.metadata, c.document_id, d.filename
-                FROM vectors v
-                JOIN document_chunks c ON v.chunk_id = c.id
-                JOIN documents d ON c.document_id = d.id
-            """)
-            
-            for row in cursor.fetchall():
-                embedding_bytes = row["embedding"]
-                embedding_array = np.frombuffer(embedding_bytes, dtype=np.float32)
-                
-                similarity = np.dot(query_embedding_array, embedding_array) / (
-                    np.linalg.norm(query_embedding_array) * np.linalg.norm(embedding_array)
-                )
-                
-                results.append({
-                    "chunk_id": row["chunk_id"],
-                    "document_id": row["document_id"],
-                    "filename": row["filename"],
-                    "content": row["content"],
-                    "metadata": json.loads(row["metadata"]),
-                    "similarity": float(similarity)
-                })
-        
-        finally:
-            conn.close()
-        
-        results.sort(key=lambda x: x["similarity"], reverse=True)
-        return results[:top_k]
-    
-    def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Get a document by ID."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute(
-                "SELECT * FROM documents WHERE id = ?",
-                (document_id,)
-            )
-            
-            result = cursor.fetchone()
-            
-            if result:
-                return {
-                    "id": result["id"],
-                    "filename": result["filename"],
-                    "content_type": result["content_type"],
-                    "size": result["size"],
-                    "upload_date": result["upload_date"],
-                    "metadata": json.loads(result["metadata"]) if result["metadata"] else {}
-                }
-            
-            return None
-        
-        finally:
-            conn.close()
-    
-    def get_all_documents(self) -> List[Dict[str, Any]]:
-        """Get all documents."""
-        documents = []
-        
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("SELECT * FROM documents")
-            
-            for row in cursor.fetchall():
-                documents.append({
-                    "id": row["id"],
-                    "filename": row["filename"],
-                    "content_type": row["content_type"],
-                    "size": row["size"],
-                    "upload_date": row["upload_date"],
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {}
-                })
-            
-            return documents
-        
-        finally:
-            conn.close()
+
 
 
 class OceanBaseVectorStore(BaseVectorStore):
@@ -288,7 +74,7 @@ class OceanBaseVectorStore(BaseVectorStore):
         self._initialize_tables()
     
     def _initialize_tables(self):
-        """Initialize the necessary tables in OceanBase."""
+        """初始化OceanBase中的必要表。"""
         try:
             with self.engine.connect() as conn:
                 conn.execute(text("""
@@ -323,19 +109,19 @@ class OceanBaseVectorStore(BaseVectorStore):
                 
                 conn.commit()
         except Exception as e:
-            print(f"Error initializing OceanBase tables: {e}")
-            print("Falling back to SQLite vector store")
+            print(f"初始化OceanBase表时出错: {e}")
+            raise e
     
     def add_document(self, document_data: Dict[str, Any], chunks: List[Dict[str, Any]]) -> str:
         """
-        Add a document and its chunks to the vector store.
+        将文档及其分块添加到向量存储中。
         
-        Args:
-            document_data: Document metadata
-            chunks: List of document chunks
+        参数:
+            document_data: 文档元数据
+            chunks: 文档分块列表
             
-        Returns:
-            Document ID
+        返回:
+            文档ID
         """
         document_id = document_data.get('id') or str(uuid.uuid4())
         
@@ -396,21 +182,19 @@ class OceanBaseVectorStore(BaseVectorStore):
             
             return document_id
         except Exception as e:
-            print(f"Error adding document to OceanBase: {e}")
-            print("Falling back to SQLite vector store")
-            sqlite_store = SQLiteVectorStore()
-            return sqlite_store.add_document(document_data, chunks)
+            print(f"向OceanBase添加文档时出错: {e}")
+            raise e
     
     def similarity_search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """
-        Perform similarity search for a query.
+        对查询执行相似度搜索。
         
-        Args:
-            query: Query text
-            top_k: Number of top results to return
+        参数:
+            query: 查询文本
+            top_k: 返回的结果数量
             
-        Returns:
-            List of document chunks with similarity scores
+        返回:
+            包含文档分块和相似度分数的列表
         """
         try:
             query_embedding = self.create_embeddings([query])[0]
@@ -446,13 +230,11 @@ class OceanBaseVectorStore(BaseVectorStore):
             results.sort(key=lambda x: x["similarity"], reverse=True)
             return results[:top_k]
         except Exception as e:
-            print(f"Error performing similarity search in OceanBase: {e}")
-            print("Falling back to SQLite vector store")
-            sqlite_store = SQLiteVectorStore()
-            return sqlite_store.similarity_search(query, top_k)
+            print(f"在OceanBase中执行相似度搜索时出错: {e}")
+            raise e
     
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Get a document by ID."""
+        """通过ID获取文档。"""
         try:
             with self.engine.connect() as conn:
                 result = conn.execute(
@@ -472,13 +254,11 @@ class OceanBaseVectorStore(BaseVectorStore):
                 
                 return None
         except Exception as e:
-            print(f"Error getting document from OceanBase: {e}")
-            print("Falling back to SQLite vector store")
-            sqlite_store = SQLiteVectorStore()
-            return sqlite_store.get_document(document_id)
+            print(f"从OceanBase获取文档时出错: {e}")
+            raise e
     
     def get_all_documents(self) -> List[Dict[str, Any]]:
-        """Get all documents."""
+        """获取所有文档。"""
         try:
             documents = []
             
@@ -497,20 +277,17 @@ class OceanBaseVectorStore(BaseVectorStore):
             
             return documents
         except Exception as e:
-            print(f"Error getting all documents from OceanBase: {e}")
-            print("Falling back to SQLite vector store")
-            sqlite_store = SQLiteVectorStore()
-            return sqlite_store.get_all_documents()
+            print(f"从OceanBase获取所有文档时出错: {e}")
+            raise e
 
 
 def get_vector_store():
-    """Get the appropriate vector store implementation."""
+    """获取向量存储实现。"""
     try:
         vector_store = OceanBaseVectorStore()
         vector_store.get_all_documents()
-        print("Using OceanBase vector store")
+        print("使用OceanBase向量存储")
         return vector_store
     except Exception as e:
-        print(f"Error connecting to OceanBase: {e}")
-        print("Falling back to SQLite vector store")
-        return SQLiteVectorStore()
+        print(f"连接到OceanBase时出错: {e}")
+        raise Exception(f"无法连接到OceanBase: {e}")

@@ -1,0 +1,25 @@
+# 基础框架
+fastapi==0.109.0
+uvicorn==0.25.0
+python-dotenv==1.0.0
+python-multipart==0.0.7
+jinja2==3.1.2
+
+# RAG组件
+langchain==0.3.23
+langchain-text-splitters==0.0.1
+langchain-community==0.0.10
+langgraph==0.3.31
+
+# 文档处理
+beautifulsoup4==4.12.2
+markdown==3.5
+docx2txt==0.8
+pypdf2==3.0.1
+unstructured==0.10.30
+
+# 数据存储
+pymysql==1.1.0
+sqlalchemy==2.0.23
+requests==2.31.0
+numpy==1.24.4
