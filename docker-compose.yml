@@ -1,0 +1,14 @@
+version: '3'
+services:
+  oceanbase:
+    image: oceanbase/oceanbase-ce:4.3.5-lts
+    container_name: oceanbase
+    ports:
+      - "2881:2881"
+    environment:
+      - MINI_MODE=1
+      - MODE=standalone
+      - OB_ROOT_PASSWORD=oceanbase
+    volumes:
+      - ./oceanbase-data:/root/ob
+    restart: always
