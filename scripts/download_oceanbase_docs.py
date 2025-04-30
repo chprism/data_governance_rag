@@ -27,7 +27,8 @@ def parse_links(html, base_url):
     menu_links = soup.select(".menu-list a, .toc a, .catalog a, .sidebar a")
 
     for link in menu_links:
-        href = link.get("href")        if href and isinstance(href, str) and not href.startswith("#") and not href.startswith("http"):
+        href = link.get("href")
+        if href and isinstance(href, str) and not href.startswith("#") and not href.startswith("http"):
             full_url = urljoin(base_url, href)
             title = link.get_text(strip=True)
             links.append({"url": full_url, "title": title})
